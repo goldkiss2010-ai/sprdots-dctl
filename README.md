@@ -76,10 +76,6 @@ Then restart Resolve (or refresh LUT/DCTL list).
 | `Chroma_Strength` | Global chroma scale (0 = near monochrome). | 全体彩度スケール（0でモノクロ寄り） |
 | `Blend` | Blend with original image. | 元画像とのブレンド |
 
-## Suggested settings / 推奨設定
-- **Pixel art look**: `Block_Size` 8–16, `Luma_Tone_Levels` 4–6, `Chroma_Tone_Levels` 3–5, `Blend` 0.7–1.0
-- **Subtle texture**: `Block_Size` 4–8, `Luma_Dither_Str` 0.2–0.5, `Chroma_Dither_Str` 0.1–0.3, `Blend` 0.4–0.7
-
 ## Notes / 注意
 - Output is clipped to 0–1.
 - Chroma normalization uses `satN = clip01(|C|)` (saturated in high chroma regions).
