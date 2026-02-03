@@ -81,9 +81,11 @@ Then restart Resolve (or refresh LUT/DCTL list).
 ## Notes / 注意
 - Output is clipped to 0–1.
 - Chroma normalization uses `satN = clip01(|C|)` (saturated in high chroma regions).
+- If dither strength exceeds 1.0, the texture can become more generative/unstable.
 
 - 出力は0〜1にクリップします。
 - 彩度量の正規化は `satN = clip01(|C|)` を採用しています（強彩度領域は飽和します）。
+- ディザ強度が1.0を超えると、生成的/不安定な質感になることがあります。
 
 ## License
 MIT License (see `LICENSE.txt`).
