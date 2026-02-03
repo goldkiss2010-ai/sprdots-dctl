@@ -7,9 +7,10 @@ Block average (mosaic) + luma/chroma quantization + 4x4 Bayer dither
 
 ## Preview / 適用イメージ
 
-| Original | sqrdots.dctl applied |
-| --- | --- |
-| ![Original example](assets/sqrdots-before.svg) | ![sqrdots.dctl applied example](assets/sqrdots-after.svg) |
+![sqrdots.dctl example](assets/SqrDots_01.jpg)
+
+## Example video / 作例動画
+- https://www.youtube.com/watch?v=Zo1zXXan6OA
 
 ## Overview / 概要
 
@@ -32,10 +33,11 @@ sqrdots.dctl は、ブロック平均（モザイク）と輝度/彩度の段階
 
 ## Requirements / 動作要件
 - DaVinci Resolve (DCTL compatible)
-- Expected input: 0–1 range RGB (depends on timeline/node setup)
+- Expected input: 0–1 range RGB (sRGB assumed; depends on timeline/node setup)
 
 - DaVinci Resolve（DCTL対応版）
-- 期待入力：0〜1レンジのRGB（タイムライン/ノード構成に依存）
+- 期待入力：0〜1レンジのRGB（sRGB想定、タイムライン/ノード構成に依存）
+- それ以外の色空間でも動作します。適宜、彩度や輝度レンジを調整してみてください。
 
 ## Installation / インストール
 
