@@ -1,0 +1,219 @@
+//------------------------------------------------------------
+// sqrdots.dctl
+// beta ver.20260130
+// Author: <Bungaku Yokota>
+// License: MIT
+
+// ・Block ごとに平均色（モザイク）
+// ・Y を少ない段階に量子化＋4x4 Bayer ディザ
+// ・C（色成分）の大きさ（彩度）も、段階量子化＋4x4 Bayer ディザ
+//   - 色相方向は保ち、彩度量だけをディザで揺らす
+// ・全体の彩度スケール / 元画像とのブレンドも調整可能
+//------------------------------------------------------------
+
+DEFINE_DCTL_ALPHA_MODE_PREMULTIPLY
+
+// === UI パラメータ ===
+
+// ブロックサイズ（ピクセル）
+DEFINE_UI_PARAMS(blockSize,       Block_Size,          DCTLUI_SLIDER_INT,   8,    1,   64, 1)
+
+// 輝度側の段数（2〜8段程度）
+DEFINE_UI_PARAMS(lumaToneLevels,  Luma_Tone_Levels,    DCTLUI_SLIDER_INT,   4,    2,   8,  1)
+// 輝度側ディザ強度（0でOFF、1前後で強め）
+DEFINE_UI_PARAMS(lumaDitherStr,   Luma_Dither_Str,     DCTLUI_SLIDER_FLOAT, 1.0,  0.0, 2.0, 0.01)
+
+// 彩度側の段数（2〜8段程度）
+DEFINE_UI_PARAMS(chromaToneLevels,Chroma_Tone_Levels,  DCTLUI_SLIDER_INT,   4,    2,   8,  1)
+// 彩度側ディザ強度
+DEFINE_UI_PARAMS(chromaDitherStr, Chroma_Dither_Str,   DCTLUI_SLIDER_FLOAT, 0.7,  0.0, 2.0, 0.01)
+
+// 全体彩度スケール（0でモノクロ〜1で元彩度）
+DEFINE_UI_PARAMS(chromaStrength,  Chroma_Strength,     DCTLUI_SLIDER_FLOAT, 0.8,  0.0, 1.5, 0.01)
+
+// 元画像とのブレンド
+DEFINE_UI_PARAMS(blendAmt,        Blend,               DCTLUI_SLIDER_FLOAT, 1.0,  0.0, 1.0, 0.01)
+
+
+//------------------------------------------------------------
+// ユーティリティ
+//------------------------------------------------------------
+
+__DEVICE__ int clamp_int(int v, int lo, int hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+__DEVICE__ float clip01(float v)
+{
+    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
+
+// Rec.709 輝度
+__DEVICE__ float get_luma_rgb(float3 rgb)
+{
+    return 0.2126f * rgb.x + 0.7152f * rgb.y + 0.0722f * rgb.z;
+}
+
+// 4x4 Bayer 行列（0〜1 未満）
+__DEVICE__ float bayer4x4(int x, int y)
+{
+    int mx = x & 3;
+    int my = y & 3;
+
+    int v = 0;
+    if (my == 0) {
+        if      (mx == 0) v = 0;
+        else if (mx == 1) v = 8;
+        else if (mx == 2) v = 2;
+        else              v = 10;
+    } else if (my == 1) {
+        if      (mx == 0) v = 12;
+        else if (mx == 1) v = 4;
+        else if (mx == 2) v = 14;
+        else              v = 6;
+    } else if (my == 2) {
+        if      (mx == 0) v = 3;
+        else if (mx == 1) v = 11;
+        else if (mx == 2) v = 1;
+        else              v = 9;
+    } else { // my == 3
+        if      (mx == 0) v = 15;
+        else if (mx == 1) v = 7;
+        else if (mx == 2) v = 13;
+        else              v = 5;
+    }
+
+    return (float)v / 16.0f; // 0〜15 → 0〜0.9375
+}
+
+
+//------------------------------------------------------------
+// メイン
+//------------------------------------------------------------
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y,__TEXTURE__ p_TexR, __TEXTURE__ p_TexG, __TEXTURE__ p_TexB)
+{
+    // --- 1. ブロック平均色 ---
+    int bs = (int)(blockSize + 0.5f);
+    if (bs < 1) bs = 1;
+
+    int bx = (p_X / bs) * bs;
+    int by = (p_Y / bs) * bs;
+
+    float3 sum = make_float3(0.0f, 0.0f, 0.0f);
+    int count = 0;
+
+    for (int j = 0; j < bs; ++j) {
+        for (int i = 0; i < bs; ++i) {
+            int sx = clamp_int(bx + i, 0, p_Width  - 1);
+            int sy = clamp_int(by + j, 0, p_Height - 1);
+
+            float r = _tex2D(p_TexR, (float)sx, (float)sy);
+            float g = _tex2D(p_TexG, (float)sx, (float)sy);
+            float b = _tex2D(p_TexB, (float)sx, (float)sy);
+
+            sum.x += r;
+            sum.y += g;
+            sum.z += b;
+            count++;
+        }
+    }
+
+    float invCount = (count > 0) ? (1.0f / (float)count) : 0.0f;
+    float3 avg = make_float3(sum.x * invCount,
+                             sum.y * invCount,
+                             sum.z * invCount);
+
+    // --- 2. Y/C 分解 ---
+    float Y  = get_luma_rgb(avg);
+    float3 Yv = make_float3(Y, Y, Y);
+    float3 C  = make_float3(avg.x - Yv.x,
+                            avg.y - Yv.y,
+                            avg.z - Yv.z);
+
+    // 共通の Bayer パターン（画面座標に固定）
+    float pat = bayer4x4(p_X, p_Y) - 0.5f; // [-0.5, +0.5]
+
+    // --- 3. Y を段階量子化＋ディザ ---
+    int   nL = (int)(lumaToneLevels + 0.5f);
+    if (nL < 2) nL = 2;
+    float lLevels = (float)nL - 1.0f;
+
+    float baseY = clip01(Y) * lLevels;
+    float sY    = lumaDitherStr;
+    float idxYf = floor(baseY + sY * pat + 0.5f);
+
+    int idxY = (int)idxYf;
+    if (idxY < 0)              idxY = 0;
+    if (idxY > (int)lLevels)   idxY = (int)lLevels;
+
+    float Yq = (float)idxY / lLevels;
+    Yq = clip01(Yq);
+    float3 Yqv = make_float3(Yq, Yq, Yq);
+
+    // --- 4. 彩度（|C|）側の量子化＋ディザ ---
+    // C の大きさ（≒彩度）
+    float sat = sqrt(C.x*C.x + C.y*C.y + C.z*C.z);
+
+    // C は理論上 sqrt(3) まで行き得るので、適度にクリップ
+    float satN = clip01(sat);  // [0,1] に正規化して扱う
+
+    int   nC = (int)(chromaToneLevels + 0.5f);
+    if (nC < 2) nC = 2;
+    float cLevels = (float)nC - 1.0f;
+
+    float baseC = satN * cLevels;
+    float sC    = chromaDitherStr;
+    float idxCf = floor(baseC + sC * pat + 0.5f);
+
+    int idxC = (int)idxCf;
+    if (idxC < 0)              idxC = 0;
+    if (idxC > (int)cLevels)   idxC = (int)cLevels;
+
+    float satNq = (float)idxC / cLevels;   // [0,1] の量子化済み彩度
+
+    // 元の sat → satN（クリップ済） → satNq に変更するスケールを算出
+    float scaleC = 0.0f;
+    if (satN > 1.0e-6f) {
+        scaleC = satNq / satN;
+    }
+
+    // 彩度スケール＋全体の chromaStrength を掛ける
+    float cs = chromaStrength;
+    // chromaStrength は 0〜1.5 スライダーだが、負方向は切っておく
+    if (cs < 0.0f) cs = 0.0f;
+
+    float finalScale = scaleC * cs;
+
+    float3 Cq = make_float3(C.x * finalScale,
+                            C.y * finalScale,
+                            C.z * finalScale);
+
+    // --- 5. Yq と Cq から再構成 ---
+    float3 pixCol = make_float3(
+        Yqv.x + Cq.x,
+        Yqv.y + Cq.y,
+        Yqv.z + Cq.z
+    );
+
+    pixCol.x = clip01(pixCol.x);
+    pixCol.y = clip01(pixCol.y);
+    pixCol.z = clip01(pixCol.z);
+
+    // --- 6. 元画像とのブレンド ---
+    float r0 = _tex2D(p_TexR, (float)p_X, (float)p_Y);
+    float g0 = _tex2D(p_TexG, (float)p_X, (float)p_Y);
+    float b0 = _tex2D(p_TexB, (float)p_X, (float)p_Y);
+    float3 orig = make_float3(r0, g0, b0);
+
+    float t = clip01(blendAmt);
+
+    float3 outCol = make_float3(
+        orig.x * (1.0f - t) + pixCol.x * t,
+        orig.y * (1.0f - t) + pixCol.y * t,
+        orig.z * (1.0f - t) + pixCol.z * t
+    );
+
+    return outCol;
+}
