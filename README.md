@@ -10,7 +10,7 @@ Block average (mosaic) + luma/chroma quantization + 4x4 Bayer dither
 ![sqrdots.dctl example](assets/SqrDots_01.jpg)
 
 ## Example video / 作例動画
-- https://www.youtube.com/watch?v=Zo1zXXan6OA
+- https://www.youtube.com/shorts/5z-CXh45iFY
 
 ## Overview / 概要
 
